@@ -1,0 +1,496 @@
+**Homework Day 14**
+
+**Author: Ahmad Ichsan Baihaqi**
+
+**Email: ahmadichsanbaihaqi@gmail.com**
+
+**Topic: EDA with R**
+
+[Dataset](https://www.kaggle.com/c/house-prices-advanced-regression-techniques/data?select=train.csv).
+
+For information, I use [this](https://rpubs.com/haritmm97/HousePrice) resource as reference for this challenge.
+
+```{r}
+library(ggplot2)
+library(caret)
+library(stringr)
+library(tibble)
+library(tidyr)
+library(readr)
+library(gplots)
+library(repr)
+library(rpart.plot)
+library(patchwork)
+library(scales)
+library(reshape2)
+library(plyr)
+library(dplyr)
+```
+
+```{r}
+df = read.csv('train.csv')
+```
+
+```{r}
+head(df)
+```
+
+Remove Id variable (not used)
+```{r}
+df = df %>% select(-c("Id"))
+```
+
+```{r}
+head(df)
+```
+
+# 1. Start with the target
+**Question**:
+
+Do univariate analysis on target variable, SalePrice, and explain insight that you got.
+
+**Answer**:
+
+Intro:
+SalePrice is a feature which represents the property's sale price in dollars.
+
+```{r}
+target_variable = df$SalePrice
+```
+
+*1. Check if there is any missing value*
+
+```{r}
+target_variable %>% is.na() %>% sum()
+```
+
+Information based on above process:
+
+1. No missing value found in SalePrice variable
+
+*2. Get summary of the data*
+
+```{r}
+summary(target_variable)
+```
+
+Information based on above summary:
+
+1. Mean value is a little far from the median. This indicate that there are SalePrice with high value which could be an outlier in our dataset.
+
+2. Max value, which 755000, is too far from the median and 3rd Quartile. This information can support our interpretation on point 1.
+
+*3. Data Visualization*
+
+We can use histogram to see our SalePrice data distribution.
+
+```{r}
+options(scipen=10000)
+ggplot(df, aes(x = SalePrice, fill = ..count..)) +
+  geom_histogram(binwidth = 5000) +
+  ggtitle('Sale Price Distribution') +
+  ylab("Count of Houses") +
+  xlab("Sale Price") + 
+  scale_x_continuous(labels = comma, breaks = seq(34000, 760000, by = 100000)) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(fill = "Count of Houses")
+```
+
+Information based on histogram visualization:
+
+1. Sale Price dataset is positively skewed. We could see several points appear outside the majority of the distribution. Later we could see with boxplot to see the outliers.
+
+2. Count of houses raised with Sale Price between (approx) 84,000 and (approx) 184,000
+
+We can use boxplot to see SalePrice data distribution and find the outliers.
+
+```{r}
+ggplot(df, aes(y = SalePrice)) +
+  geom_boxplot() +
+  ggtitle('Sale Price Distribution') +
+  ylab('Sale Prices') +
+  scale_y_continuous(labels = comma, breaks = seq(34000, 760000, by = 100000))
+```
+
+Information based on boxplot visualization:
+
+1. There are a lot of outliers. But, we can't jump to conclusion that the outliers is not importants. This is because SalePrice values is affected by other variables which not displayed here.
+
+# 2. SalePrice correlation
+**Question**:
+
+Find 5 variables with high correlation (positive and negative) on SalePrice. Determined if the results is make sense?
+
+**Answer**:
+
+To find correlation between variables and our target, we could use Correlation Heatmap to plot correlation coefficients. But, to build a heatmap, the variables should be in numeric. Let's find out the structure of our data first.
+
+Get structure of our data
+
+```{r}
+str(df)
+```
+
+```{r}
+table(sapply(df, class))
+```
+
+As we can see above, there are 43 variables with characters type and 37 variables with integer types. There are a lot of variable to be encoded from categorical into numeric. To limit our challenge, assumed that variable which has missing value has no correlation with the SalePrice.
+
+Find missing value
+
+```{r}
+find_missing_value = sapply(df, function(x) sum(is.na(x)))
+
+column_with_missing_value = find_missing_value[find_missing_value > 0]
+
+column_with_missing_value
+```
+
+Btw, above information is quite interestiong. All variable which related with "Garage" has same total missing value. I assumed that this is because the house didn't have a garage. Let's see how much house with no garage.
+
+```{r}
+sum(df$GarageArea == 0)
+```
+
+Okay, that's confirmed our assumption.
+
+Back to our topic, we won't use those variable with missing value, let's create a new dataframe without those variable.
+
+```{r}
+names(column_with_missing_value)
+```
+
+```{r}
+df_no_missing = df %>% select(-names(column_with_missing_value))
+
+# double check
+sapply(df_no_missing, function(x) sum(is.na(x)))
+```
+
+```{r}
+str(df_no_missing)
+```
+
+Find categorical variable to be encoded
+```{r}
+character_variable = df_no_missing %>% select(where(is.character)) %>% names()
+
+character_variable
+```
+
+Encode all categorical variable
+```{r}
+label_encoder = function(vec){
+    levels = sort(unique(vec))
+    function(x){
+        match(x, levels)
+    }
+}
+
+encoded_no_missing = df_no_missing
+
+for (column in character_variable) {
+  encoded_no_missing[[column]] = label_encoder(df_no_missing[[column]])(df_no_missing[[column]])
+}
+
+head(encoded_no_missing)
+```
+
+```{r}
+model_var <- c('SalePrice', 
+                'OverallQual','OverallCond','YearBuilt',
+                'TotalBsmtSF', 
+                'GrLivArea','BedroomAbvGr','KitchenAbvGr',
+                'TotRmsAbvGrd','Fireplaces',
+                'GarageArea','OpenPorchSF','PoolArea',
+                 'MSZoning', 'BldgType')
+
+heat <- encoded_no_missing[,model_var]
+```
+
+```{r}
+options(repr.plot.width = 20, repr.plot.height = 20)
+qplot(x=Var1, y=Var2, data=melt(cor(encoded_no_missing, use="p")), fill=value, geom="tile") +
+   scale_fill_gradient2(low = "green", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+   name="Correlation") +
+   theme_minimal()+ 
+   theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 8, hjust = 1))+
+   coord_fixed()+
+   ggtitle("Correlation Heatmap between all variable") +
+   theme(plot.title = element_text(hjust = 0.4))
+```
+
+Oops, looks like it's too much. Let's reduced the column XD
+```{r}
+model_var <- c('SalePrice', 
+                'OverallQual','OverallCond','YearBuilt',
+                'TotalBsmtSF', 
+                'GrLivArea','BedroomAbvGr','KitchenAbvGr',
+                'TotRmsAbvGrd','Fireplaces',
+                'GarageArea','OpenPorchSF','PoolArea',
+                 'MSZoning', 'BldgType')
+
+heat <- encoded_no_missing[,model_var]
+head(heat)
+```
+
+```{r}
+geom.text.size = 2
+theme.size = (14/5) * geom.text.size
+
+ggplot(
+      melt(cor(heat, use="p")),
+      aes(
+        x = Var1,
+        y = Var2,
+        fill = value,
+      )
+    ) +
+    geom_tile() +
+    scale_fill_gradient2(low = "red", high = "blue", mid = "white", 
+    midpoint = 0, limit = c(-1,1), space = "Lab", 
+    name="Correlation") +
+    theme_minimal() + 
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 8, hjust = 1)) +
+    ggtitle("Correlation Heatmap") +
+    geom_text(
+      aes(label = round(value, 1)),
+      size=geom.text.size
+    ) +
+    theme(
+      plot.title = element_text(hjust = 0.4),
+      axis.text = element_text(size = theme.size)
+    ) +
+    coord_fixed()
+```
+
+Lol, I just realized that there is an example for corrplot in the class hands on :"
+
+```{r,fig.width=14}
+heat %>% select_if(is.numeric) %>% cor() %>% corrplot::corrplot(type='lower',method = 'number')
+```
+
+Highest (five) correlation with SalePrice:
+
+1. OverallQual (0.8) => This is make sense since OverallQual variable means the overall material and finish quality. House with higher quality tend to have a high price. On the other hand, house with lower quality tend to have lower price.
+
+2. GrLivArea (0.7) => This is make sense since GrLivArea variable indicates the above ground (grade) living area (in square feet) available in the house. This means house with bigger area tend to have higher price prior to house with smaller area.
+
+3. TotalBsmtSF (0.6) => TotalBsmtSF variable indicates the total square feet of basement area. This variable has pretty much high correlation but not higher than OverallQual and GrLivArea. This might be because basement is not a mandatory feature to be exist inside a house.
+
+4. GarageArea (0.6) => GarageArea, pretty verbose variable. This variable indicate the garage area of a house. Similar with basement area (point 3), this variable has pretty much high correlation but also not the highest. Again, this might be because garage is not a mandatory feature to be exist inside a house.
+
+5. YearBuilt (0.5) => Last, year built. The correlation value indicate that house price not too much related with the year when the house is built. I assumed this is because SalePrice is more affected by OverallQual and YearBuilt is not related with OverallQual. Let's proved this assumption. 
+
+```{r}
+ggplot(heat, aes(x=OverallQual, y=YearBuilt)) + 
+  geom_point(shape=1) +  
+  geom_smooth(method=lm , color="red", se=FALSE)+
+  ggtitle("Scatter plot of OverallQual and YearBuilt") +
+  theme(plot.title = element_text(hjust = 0.4))
+```
+
+As we can see above, there are some point when the house built in 1900 (which is an old house) but still has a high OverallQual. That's why, YearBuilt has low impact to SalePrice as long as the house has high OverallQual.
+
+Lowest (five) correlation with SalePrice:
+
+1. MSZoning (-0.2) => MSZoning indicate the general zoning classification. The correlation value is the lowest, which indicate that MSZoning won't affect the SalePrice. But, are you sure? Let's visualize using boxplot between SalePrice and MSZoning
+
+```{r}
+options(repr.plot.width=9, repr.plot.height=6)
+# boxplot of SalePrice by MSZoning
+# add average value of SalePrice as red point
+ggplot(df, aes(x=MSZoning, y=SalePrice, fill=MSZoning)) + 
+  geom_boxplot(alpha=0.3) +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=4, color="red", fill="red")+
+  theme(legend.position="none")+
+  ggtitle("Boxplot of SalePrice by MSZoning")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+For information:
+
+1. C (all) means commercial
+
+2. FV means Floating Village Residential
+
+3. RH means Residential High Density
+
+4. RL means Residential Low Density
+
+5. RM means Residential Medium Density
+
+As we can see above, it clearly show us that there is a high SalePrice for RL ("Residential Low Density") houses. Which means, MSZoning contribute for the SalePrice. Moreover, The sales in FV (“Floating Village Residential”) area have the highest average sale price, followed by RL (“Residential Low Density”). While C (all) (“Commercial”) sales have the lowest average sale price.
+
+It is quite strange that commercial area has the lowest average Sale Price while village area has the highest. One possible explanation could be SalePrice is also related to the size of houses. To confirm, let’s explore the average size in these area.
+
+The variable indicates size in this dataset is called GrLivArea.
+
+```{r}
+ddply(df, .(MSZoning), summarize,  size=mean(GrLivArea))
+```
+
+It is obvious that the avarage size of houses in Commecial are is much smaller than Floating Village area, which verified our assumption above.
+
+In short, despite MSZoning has low correlation, MSZoning contribute to SalePrice due to each MSZoning has different GrLivArea mean which will affect the SalePrice.
+
+2. OverallCond (-0.1) => OverallCond indicate the rates of the overall condition of the house.
+
+```{r}
+df %>% ggplot(aes(x=OverallCond,y=SalePrice)) + geom_point()
+```
+
+Based on above visualization, it's show us that OverallCond has low correlation with SalePrice. I couldn't find how the OverallCond value determined, but I assumed that OverallCond is a "rate result" based on a lot of variable, which there are variable affect the SalePrice but some others is not, thus it will affect the OverallCond value but the OverallCond value itself is not directly related with SalePrice.
+
+3. KitchenAbvGr (-0.1) => Idk why this feature exist in the dataset but has no description in data description on kaggle.
+
+4. BldgType (-0.1) => BldgType indicate type of dwelling.
+
+```{r}
+unique(df$BldgType)
+```
+
+Unique value of BldgType:
+
+1. 1Fam means Single-family Detached
+
+2. 2FmCon means Two-family Conversion; originally built as one-family dwelling
+
+3. Duplex
+
+4. TwnhsE means Townhouse End Unit
+
+5. Twnhs means Townhouse Inside Unit (in kaggle, it should be TwnhsI)
+
+```{r}
+# historgram of housing price by BldgType 
+ggplot(df, aes(SalePrice)) +
+  geom_histogram(
+    aes(fill = BldgType),
+    position = position_stack(reverse = TRUE),
+    binwidth = 20000
+  ) +
+  ggtitle("BldgType Distribution in SalePrice Histogram") +
+  ylab("Count") +
+  xlab("Housing Price") +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position=c(0.9,0.8),
+    legend.background = element_rect(fill = "grey90", size = 0.5, linetype = "solid", colour = "black")
+  )
+```
+```{r}
+options(repr.plot.width=9, repr.plot.height=6)
+p1 = ggplot(df, aes(x=BldgType, y=GrLivArea, fill=BldgType)) + 
+  geom_boxplot(alpha=0.3) +
+  stat_summary(fun=mean, geom="point", shape=20, size=4, color="red", fill="red")+
+  theme(legend.position="none")+
+  ggtitle("Boxplot of GrLivArea by BldgType")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+p2 = ggplot(df, aes(x=BldgType, y=SalePrice, fill=BldgType)) + 
+  geom_boxplot(alpha=0.3) +
+  stat_summary(fun=mean, geom="point", shape=20, size=4, color="red", fill="red")+
+  theme(legend.position="none")+
+  ggtitle("Boxplot of SalePrice by BldgType")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+(p1 | p2)
+```
+
+Based on BldgType and SalePrice coefficient correlation, it shows a low correlation. At first, I assumed different BldgType will have a decent GrLivArea which will affect the SalePrice. But, based on above visualization, Duplex - which has highest GrLivArea mean - has a low price. As previous explanation, SalePrice is has high correlation with GrLivArea. *Which means, Duplex, with high GrLivArea, should has a high price. But, on the right boxplot, it shows that Duplex has low price*. Then, why Duplex has low SalePrice? I assumed, that the price also affected by the demand. High demand, limited supplies, will raised the sale price. In this case, Duplex has low demand despite it's high GrLivArea. Thats why Duplex has low price.
+
+5. PoolArea (0.1) => Indicate size of pool area in square feet. It's show a positive correlation. Which means, pool affect the sale price. But, since pool is not a mandatory feature of a house, the correlation is not high.
+
+# 3. It is never hurt to test basic knowledge.
+**Question**:
+
+Ada pandangan bahwa OverallQual rendah memiliki kecenderungan harga yang lebih rendah, dan rumah dengan OverallQual tinggi memiliki kecenderungan harga yang lebih tinggi. Lakukan analisis terhaadp hubungan OverallQual dan SalePrice.
+
+**Answer**:
+
+OverallQual variable means the overall material and finish quality. House with higher quality tend to have a high price. On the other hand, house with lower quality tend to have lower price.
+
+```{r}
+ggplot(df, aes(x = SalePrice,fill = as.factor(OverallQual))) +
+  geom_histogram(position = "stack", binwidth = 10000) +
+  ggtitle("Histogram of SalePrice") +
+  ylab("Count") +
+  xlab("Housing Price") + 
+  scale_fill_discrete(name="OverallQual")+
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position=c(0.9,0.7),
+    legend.background = element_rect(fill="grey90", size=0.5, linetype="solid",  colour ="black")
+  ) +
+  scale_x_continuous(labels = comma)
+```
+
+Based on above visualization, we can see that most of high OverallQual value lies above 300,000 while lower OverallQual mostly lies below 300,000.
+
+# 4. Beware of false correlation
+**Question**:
+
+Ada kecenderungan bahwa rumah baru memiliki harga yang lebih tinggi. Akan tetapi, kita tidak boleh gegabah untuk menyimpulkan bahwa rumah baru pasti memiliki harga jual yang lebih tinggi, karena apabila rumah baru yang dibangun tidak baik, tentu harganya juga tidak bisa tinggi. Kira-kira apa hal yang membuat rumah baru memiliki nilai yang lebih tinggi?
+Hint : Cek korelasi antara YearBuilt dengan prediktor lainnya
+
+**Answer**:
+
+```{r}
+p3 = ggplot(heat, aes(x=YearBuilt, y=SalePrice)) + 
+  geom_point(shape=1) +  
+  geom_smooth(method=lm , color="red", se=FALSE)+
+  ggtitle("Scatter plot of SalePrice and YearBuilt") +
+  theme(plot.title = element_text(hjust = 0.4)) +
+  scale_y_continuous(labels = comma)
+
+p4 = ggplot(heat, aes(x=OverallQual, y=YearBuilt)) + 
+  geom_point(shape=1) +  
+  geom_smooth(method=lm , color="red", se=FALSE)+
+  ggtitle("Scatter plot of OverallQual and YearBuilt") +
+  theme(plot.title = element_text(hjust = 0.4))
+
+(p3 / p4)
+```
+As on above scatter plot, the trend between SalePrice and YearBuilt is raised. The recent house tend to have high sale price. Question is, why? The second scatter plot might give the answer for us. The recent house tend to have higher OverallQual. OverallQual has high correlation with SalePrice. This indicate, that a new house tend to have a high OverallQual which will raised the SalePrice.
+
+# 5. Haunted place(?)
+Perhatikan scatter plot berikut
+
+```{r}
+df %>% ggplot(aes(x=GrLivArea,y=SalePrice)) + geom_point()
+```
+
+**Question**:
+
+Disebelah kanan, ada dua rumah, yang memiliki GreenLivingArea sangat besar, tetapi SalePrice nya murah. Coba analisis kenapa kedua rumah tersebut murah?
+
+**Answer**:
+
+```{r}
+subset(df, GrLivArea > 4600)
+```
+
+Based on above data for those 2 houses, take a look into SaleCondition feature. Both of them have Partial SaleCondition. Partial SaleCondition means the house was not completed when last assessed (associated with New Homes). It means, the price is low because it's not completed yet.
+
+# 6. Freestyle
+
+Lakukan EDA secara bebas dan sampaikan 1 insight yang sekiranya menarik.
+
+-
+
+
+
+
+
+
+
+
+
+
+
+
+
+
